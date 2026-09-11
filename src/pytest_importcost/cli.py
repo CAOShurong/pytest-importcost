@@ -88,6 +88,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="show which conftest/test file first imported each package",
     )
+    parser.add_argument(
+        "--suite",
+        action="store_true",
+        help="rank only packages first imported by conftest.py / test files",
+    )
+    parser.add_argument(
+        "--new",
+        action="store_true",
+        help="with --compare, fail if new packages were imported",
+    )
     args = parser.parse_args(argv)
     rest = list(args.pytest_args)
     if rest[:1] == ["--"]:
@@ -111,6 +121,8 @@ def main(argv: list[str] | None = None) -> int:
             forbid=parse_forbid_names(args.forbid),
             repeat=max(1, args.repeat),
             blame=bool(args.blame),
+            suite=bool(args.suite),
+            fail_on_new=bool(args.new),
         )
     except subprocess.TimeoutExpired as exc:
         print(f"importcost: timed out: {exc}", file=sys.stderr)

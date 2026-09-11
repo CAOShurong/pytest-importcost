@@ -125,22 +125,33 @@ def render_report(
     min_us: int | None = None,
     max_us: int | None = None,
     importers: dict[str, str] | None = None,
+    suite: bool = False,
+    all_count: int | None = None,
 ) -> str:
     shown_total = sum(costs.values())
     total = shown_total if total_us is None else total_us
     ranked = sorted(costs.items(), key=lambda item: item[1], reverse=True)
     width = max((len(name) for name, _ in ranked[:limit]), default=8)
     bar_w = 28
-    head = f"pytest collection import cost  {format_ms(total)}  across {len(costs)} {unit}"
+    n_all = all_count if all_count is not None else len(costs)
+    head = f"pytest collection import cost  {format_ms(total)}  across {n_all} {unit}"
     if repeat > 1:
         head += f"  (median of {repeat})"
     lines = [head, ""]
+    if suite:
+        lines.append(
+            f"  suite-imported  {len(costs)} {unit}  {format_ms(shown_total)}  "
+            "(pytest/startup omitted from rows)"
+        )
+        lines.append("")
     if repeat > 1 and min_us is not None and max_us is not None:
         lines.append(f"  runs  min {format_ms(min_us)}  max {format_ms(max_us)}")
         lines.append("")
     top = ranked[:limit]
     peak = top[0][1] if top else 1
-    show_blame = bool(importers)
+    show_blame = bool(importers) or suite
+    if not top and suite:
+        lines.append("  (no suite-imported packages)")
     for name, us in top:
         frac = us / peak if peak else 0.0
         filled = int(round(frac * bar_w))
@@ -168,6 +179,10 @@ def render_report(
     if show_blame:
         lines.append(
             "The last column is the conftest/test file that first imported that package."
+        )
+    if suite:
+        lines.append(
+            "Rows are packages first imported by conftest.py / test_*.py, not pytest itself."
         )
     return "\n".join(lines)
 
@@ -256,6 +271,8 @@ def render_json(
     min_us: int | None = None,
     max_us: int | None = None,
     importers: dict[str, str] | None = None,
+    suite: bool = False,
+    all_count: int | None = None,
 ) -> str:
     shown_total = sum(costs.values())
     total = shown_total if total_us is None else total_us
@@ -264,10 +281,11 @@ def render_json(
     top = ranked if limit <= 0 else ranked[:limit]
     hits = list(forbidden or [])
     who = importers or {}
+    n_all = all_count if all_count is not None else len(costs)
     payload = {
         "total_us": total,
         "total_ms": round(total_ms, 3),
-        "count": len(costs),
+        "count": n_all,
         "grouped_by": "module" if unit == "modules" else "package",
         "budget_ms": budget_ms,
         "budget_ok": None if budget_ms is None else total_ms <= budget_ms,
@@ -281,6 +299,10 @@ def render_json(
         "min_us": min_us,
         "max_us": max_us,
         "importers": who or None,
+        "suite": suite,
+        "suite_us": shown_total if suite else None,
+        "suite_ms": round(shown_total / 1000.0, 3) if suite else None,
+        "suite_count": len(costs) if suite else None,
         "rows": [
             {
                 "name": name,
@@ -392,4 +414,62 @@ def render_compare(
             lines.append(f"    {row['name']:<24} -{format_ms(-row['delta_us'])}")
     if not added and not gone and not diff["slower"] and not diff["faster"]:
         lines.append("  same package set")
+    return "\n".join(lines)
+
+
+def render_new_packages(added: list[dict]) -> str:
+    """Fail-job text when --new sees packages absent from the saved profile."""
+    if not added:
+        return ""
+    lines = ["importcost: new packages vs saved profile:"]
+    width = max(len(str(row["name"])) for row in added)
+    for row in added:
+        lines.append(f"  {row['name']:<{width}s}  {format_ms(int(row['self_us']))}")
+    return "\n".join(lines)
+
+
+def render_markdown(
+    costs: dict[str, int],
+    *,
+    limit: int = 12,
+    total_us: int | None = None,
+    unit: str = "packages",
+    importers: dict[str, str] | None = None,
+    suite: bool = False,
+    all_count: int | None = None,
+) -> str:
+    """GitHub job-summary table (also useful as a PR comment)."""
+    shown_total = sum(costs.values())
+    total = shown_total if total_us is None else total_us
+    n_all = all_count if all_count is not None else len(costs)
+    ranked = sorted(costs.items(), key=lambda item: item[1], reverse=True)
+    lines = [
+        "## pytest collection import cost",
+        "",
+        f"**{format_ms(total)}** across {n_all} {unit}",
+    ]
+    if suite:
+        lines.append(
+            f"Suite-imported: **{len(costs)} {unit}** / {format_ms(shown_total)} "
+            "(pytest/startup omitted from rows)."
+        )
+    lines.extend(["", f"| {unit[:-1] if unit.endswith('s') else unit} | ms | share | first imported by |", "|---|---:|---:|---|"])
+    who = importers or {}
+    top = ranked[:limit]
+    for name, us in top:
+        share = (us / total * 100.0) if total else 0.0
+        importer = short_importer(who.get(name, ""), 48) if who else ""
+        if not importer and suite:
+            importer = "(collection startup)"
+        lines.append(
+            f"| `{name}` | {us / 1000.0:.2f} | {share:.1f}% | {importer} |"
+        )
+    leftover = ranked[limit:]
+    if leftover:
+        other = sum(us for _, us in leftover)
+        share = (other / total * 100.0) if total else 0.0
+        lines.append(f"| *(others)* | {other / 1000.0:.2f} | {share:.1f}% | |")
+    if not top and suite:
+        lines.append("| *(no suite-imported packages)* | | | |")
+    lines.append("")
     return "\n".join(lines)

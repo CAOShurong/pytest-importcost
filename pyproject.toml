@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pytest-importcost"
-version = "0.6.0"
+version = "0.7.0"
 description = "Show which imports make pytest collection slow."
 readme = "README.md"
 requires-python = ">=3.9"

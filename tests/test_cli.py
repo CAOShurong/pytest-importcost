@@ -153,3 +153,104 @@ def test_cli_blame(capsys):
     assert rc == 0
     assert "pkg_from_conf" in out
     assert "conftest.py" in out
+
+
+def test_suite_ranks_helpers_not_pytest():
+    report, code = measured_collect(
+        [str(BLAME)], timeout=60, suite=True, hide_stdlib=True, limit=50
+    )
+    assert code in (0, 5)
+    assert "suite-imported" in report
+    assert "pkg_from_conf" in report
+    assert "pkg_from_case" in report
+    bar_names = [ln.split()[0] for ln in report.splitlines() if "█" in ln or "░" in ln]
+    assert "pkg_from_conf" in bar_names
+    assert "_pytest" not in bar_names
+    assert "pygments" not in bar_names
+
+
+def test_suite_json_rows_are_suite_only():
+    report, code = measured_collect(
+        [str(BLAME)], timeout=60, suite=True, as_json=True, hide_stdlib=True
+    )
+    payload = json.loads(report)
+    assert code in (0, 5)
+    assert payload["suite"] is True
+    assert payload["suite_count"] >= 2
+    names = [row["name"] for row in payload["rows"]]
+    assert "pkg_from_conf" in names
+    assert "pkg_from_case" in names
+    assert "_pytest" not in names
+
+
+def test_new_requires_compare():
+    report, code = measured_collect([str(FIXTURE)], timeout=60, fail_on_new=True)
+    assert code == 1
+    assert "--new requires --compare" in report
+
+
+def test_new_fails_when_package_missing_from_baseline():
+    with tempfile.TemporaryDirectory() as tmp:
+        baseline = Path(tmp) / "before.json"
+        report, code = measured_collect(
+            [str(FIXTURE)], timeout=60, save_path=str(baseline), as_json=True
+        )
+        assert code == 0
+        payload = json.loads(baseline.read_text(encoding="utf-8"))
+        payload["rows"] = [row for row in payload["rows"] if row["name"] != "json"]
+        baseline.write_text(json.dumps(payload), encoding="utf-8")
+        report, code = measured_collect(
+            [str(FIXTURE)], timeout=60, compare_path=str(baseline), fail_on_new=True
+        )
+        assert code == 1
+        assert "new packages vs saved profile" in report
+        assert "json" in report
+
+
+def test_new_passes_against_own_save():
+    with tempfile.TemporaryDirectory() as tmp:
+        baseline = Path(tmp) / "before.json"
+        _, code = measured_collect(
+            [str(FIXTURE)], timeout=60, save_path=str(baseline)
+        )
+        assert code == 0
+        report, code = measured_collect(
+            [str(FIXTURE)],
+            timeout=60,
+            compare_path=str(baseline),
+            fail_on_new=True,
+            slower_ms=1_000_000,
+        )
+        assert code == 0
+        assert "new packages vs saved profile" not in report
+
+
+def test_github_step_summary(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmp:
+        summary = Path(tmp) / "summary.md"
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+        _, code = measured_collect([str(FIXTURE)], timeout=60)
+        assert code in (0, 5)
+        text = summary.read_text(encoding="utf-8")
+        assert "pytest collection import cost" in text
+        assert "|" in text
+
+
+def test_github_notice_for_suite_files(monkeypatch, capsys):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    _, code = measured_collect(
+        [str(BLAME)], timeout=60, suite=True, hide_stdlib=True, limit=50
+    )
+    err = capsys.readouterr().err.replace("\\", "/")
+    assert code in (0, 5)
+    assert "::notice file=" in err
+    assert "conftest.py" in err or "test_a.py" in err
+
+
+def test_cli_suite(capsys):
+    rc = main(["--suite", "--hide-stdlib", "--limit", "50", "--", str(BLAME)])
+    out = capsys.readouterr().out.replace("\\", "/")
+    assert rc == 0
+    assert "suite-imported" in out
+    assert "pkg_from_conf" in out
+    assert "conftest.py" in out

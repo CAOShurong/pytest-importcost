@@ -189,6 +189,22 @@ def extract_blame(text: str) -> dict[str, str]:
     return {}
 
 
+def is_suite_importer(path: str | None) -> bool:
+    """True when first-importer is a conftest or test module, not pytest itself."""
+    if not path or path == "(collection startup)":
+        return False
+    return _is_suite_file(path) and not _noise_label(path)
+
+
+def suite_only(costs: dict[str, int], importers: dict[str, str]) -> dict[str, int]:
+    """Keep packages first imported by the suite (conftest / test files)."""
+    return {
+        name: us
+        for name, us in costs.items()
+        if is_suite_importer(importers.get(name))
+    }
+
+
 def file_costs(
     costs: dict[str, int], importers: dict[str, str]
 ) -> list[tuple[str, int, list[str]]]:

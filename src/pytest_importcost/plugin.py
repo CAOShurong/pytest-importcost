@@ -14,6 +14,8 @@ _BOOL_FLAGS = {
     "--importcost-hide-stdlib",
     "--importcost-blame",
     "--importcost-plugins",
+    "--importcost-suite",
+    "--importcost-new",
 }
 _VALUE_FLAGS = {
     "--importcost-budget-ms",
@@ -130,6 +132,18 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="include globally installed pytest plugins in the measured child",
     )
+    group.addoption(
+        "--importcost-suite",
+        action="store_true",
+        default=False,
+        help="rank only packages first imported by conftest.py / test files",
+    )
+    group.addoption(
+        "--importcost-new",
+        action="store_true",
+        default=False,
+        help="with --importcost-compare, fail if new packages were imported",
+    )
 
 
 def _requested(config: pytest.Config) -> bool:
@@ -145,6 +159,8 @@ def _requested(config: pytest.Config) -> bool:
         or int(config.getoption("importcost_repeat") or 1) > 1
         or config.getoption("importcost_blame")
         or config.getoption("importcost_plugins")
+        or config.getoption("importcost_suite")
+        or config.getoption("importcost_new")
     )
 
 
@@ -176,6 +192,8 @@ def pytest_cmdline_main(config: pytest.Config) -> int | None:
         forbid=parse_forbid_names(config.getoption("importcost_forbid")),
         repeat=max(1, int(config.getoption("importcost_repeat") or 1)),
         blame=bool(config.getoption("importcost_blame")),
+        suite=bool(config.getoption("importcost_suite")),
+        fail_on_new=bool(config.getoption("importcost_new")),
     )
     sys.stdout.write(report + "\n")
     # 5 = pytest "no tests collected"; still a successful measurement.

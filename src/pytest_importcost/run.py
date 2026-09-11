@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .blame import extract_blame
+from .blame import extract_blame, is_suite_importer, suite_only
 from .parse import (
     ParseError,
     costs_from_saved,
@@ -22,6 +22,8 @@ from .parse import (
     render_compare,
     render_forbid,
     render_json,
+    render_markdown,
+    render_new_packages,
     render_report,
 )
 
@@ -98,8 +100,14 @@ def measured_collect(
     forbid: list[str] | None = None,
     repeat: int = 1,
     blame: bool = False,
+    suite: bool = False,
+    fail_on_new: bool = False,
 ) -> tuple[str, int]:
-    """Return (report text, exit code). Exit 1 on budget / forbid / --slower-ms."""
+    """Return (report text, exit code). Exit 1 on budget / forbid / --slower-ms / --new."""
+    if fail_on_new and not compare_path:
+        return "importcost: --new requires --compare", 1
+    if suite:
+        blame = True
     n = max(1, int(repeat))
     maps: list[dict[str, int]] = []
     totals: list[int] = []
@@ -129,6 +137,8 @@ def measured_collect(
     display = drop_stdlib(costs) if hide_stdlib else costs
     unit = "modules" if modules else "packages"
     blame_map = importers if blame else None
+    ranked = suite_only(display, importers) if suite else display
+    all_count = len(display)
     if save_path:
         try:
             Path(save_path).write_text(
@@ -147,6 +157,7 @@ def measured_collect(
     compare_blob = None
     compare_diff = None
     slower = False
+    new_hits: list[dict] = []
     if compare_path:
         try:
             saved = json.loads(Path(compare_path).read_text(encoding="utf-8"))
@@ -164,11 +175,20 @@ def measured_collect(
             compare_blob += (
                 f"\nimportcost: slower than saved by more than {slower_ms:g} ms"
             )
+        if fail_on_new:
+            added = list(compare_diff["added"]) if compare_diff else []
+            if suite:
+                added = [
+                    row
+                    for row in added
+                    if is_suite_importer(importers.get(str(row["name"])))
+                ]
+            new_hits = added
 
     hits = forbidden_hits(costs, forbid or [])
     if as_json:
         report = render_json(
-            display,
+            ranked,
             limit=limit,
             total_us=raw_total,
             unit=unit,
@@ -179,15 +199,18 @@ def measured_collect(
             min_us=min_total if n > 1 else None,
             max_us=max_total if n > 1 else None,
             importers=blame_map,
+            suite=suite,
+            all_count=all_count,
         )
         if compare_blob:
             payload = json.loads(report)
             payload["compare"] = compare_blob
             payload["diff"] = compare_diff
+            payload["new_ok"] = None if not fail_on_new else not new_hits
             report = json.dumps(payload, indent=2)
     else:
         report = render_report(
-            display,
+            ranked,
             limit=limit,
             total_us=raw_total,
             unit=unit,
@@ -195,6 +218,8 @@ def measured_collect(
             min_us=min_total if n > 1 else None,
             max_us=max_total if n > 1 else None,
             importers=blame_map,
+            suite=suite,
+            all_count=all_count,
         )
         if hide_stdlib:
             report += "\nStdlib names omitted from rows; total still includes them."
@@ -228,4 +253,62 @@ def measured_collect(
             sys.stderr.write(
                 f"importcost: slower than saved by more than {slower_ms:g} ms\n"
             )
+    if new_hits:
+        line = render_new_packages(new_hits)
+        if as_json:
+            sys.stderr.write(line + "\n")
+        else:
+            report = report.rstrip() + "\n\n" + line
+        if code == 0:
+            code = 1
+    _write_github_summary(
+        ranked,
+        limit=limit,
+        total_us=raw_total,
+        unit=unit,
+        importers=blame_map,
+        suite=suite,
+        all_count=all_count,
+    )
     return report, code
+
+
+def _write_github_summary(
+    costs: dict[str, int],
+    *,
+    limit: int,
+    total_us: int,
+    unit: str,
+    importers: dict[str, str] | None,
+    suite: bool,
+    all_count: int,
+) -> None:
+    """Append a markdown table to GITHUB_STEP_SUMMARY; notice annotations on GHA."""
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        try:
+            with open(summary, "a", encoding="utf-8") as fh:
+                fh.write(
+                    render_markdown(
+                        costs,
+                        limit=limit,
+                        total_us=total_us,
+                        unit=unit,
+                        importers=importers,
+                        suite=suite,
+                        all_count=all_count,
+                    )
+                )
+        except OSError:
+            pass
+    if os.environ.get("GITHUB_ACTIONS") != "true" or not importers:
+        return
+    ranked = sorted(costs.items(), key=lambda item: item[1], reverse=True)
+    for name, us in ranked[:limit]:
+        path = importers.get(name) or ""
+        if not is_suite_importer(path):
+            continue
+        # Workflow command: surfaces on the file in the PR.
+        sys.stderr.write(
+            f"::notice file={path}::{name} {format_ms(us)} during pytest collection\n"
+        )

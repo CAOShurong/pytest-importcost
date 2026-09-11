@@ -1,6 +1,6 @@
 import json
 
-from pytest_importcost.blame import extract_blame, file_costs
+from pytest_importcost.blame import extract_blame, file_costs, is_suite_importer, suite_only
 from pytest_importcost.parse import (
     costs_from_saved,
     diff_profiles,
@@ -14,6 +14,8 @@ from pytest_importcost.parse import (
     render_compare,
     render_forbid,
     render_json,
+    render_markdown,
+    render_new_packages,
     render_report,
     short_importer,
 )
@@ -173,6 +175,60 @@ def test_render_json_includes_importer():
     )
     assert payload["rows"][0]["importer"] == "tests/conftest.py"
     assert payload["importers"]["pandas"] == "tests/conftest.py"
+
+
+def test_is_suite_importer_accepts_conftest_and_tests():
+    assert is_suite_importer("tests/conftest.py")
+    assert is_suite_importer("tests/test_a.py")
+    assert is_suite_importer("pkg/foo_test.py")
+    assert not is_suite_importer("(collection startup)")
+    assert not is_suite_importer(None)
+    assert not is_suite_importer("site-packages/_pytest/config/__init__.py")
+
+
+def test_suite_only_drops_pytest_startup():
+    kept = suite_only(
+        {"pandas": 4000, "_pytest": 9000, "json": 100},
+        {
+            "pandas": "tests/conftest.py",
+            "_pytest": "(collection startup)",
+            "json": "(collection startup)",
+        },
+    )
+    assert kept == {"pandas": 4000}
+
+
+def test_render_report_suite_header_omits_empty_bars():
+    text = render_report(
+        {"pandas": 400_000},
+        total_us=500_000,
+        suite=True,
+        all_count=40,
+        importers={"pandas": "tests/conftest.py"},
+    )
+    assert "suite-imported" in text
+    assert "across 40 packages" in text
+    assert "pandas" in text
+    assert "pytest/startup omitted" in text
+
+
+def test_render_new_packages_lists_names():
+    text = render_new_packages([{"name": "pandas", "self_us": 4000}])
+    assert "new packages vs saved profile" in text
+    assert "pandas" in text
+
+
+def test_render_markdown_table():
+    text = render_markdown(
+        {"pandas": 400_000, "json": 50_000},
+        total_us=450_000,
+        importers={"pandas": "tests/conftest.py"},
+        suite=True,
+        all_count=12,
+    )
+    assert "## pytest collection import cost" in text
+    assert "| `pandas`" in text
+    assert "tests/conftest.py" in text
 
 
 def test_render_json_forbid_fields():

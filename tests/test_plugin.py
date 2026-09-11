@@ -30,6 +30,8 @@ def test_strip_importcost_args_drops_flags_and_values():
             "3",
             "--importcost-blame",
             "--importcost-plugins",
+            "--importcost-suite",
+            "--importcost-new",
             "tests",
             "-q",
         ]
