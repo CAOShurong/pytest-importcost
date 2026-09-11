@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pytest-importcost"
+version = "0.1.0"
+description = "Show which imports make pytest collection slow."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+authors = [{ name = "Shurong Cao", email = "170531907+CAOShurong@users.noreply.github.com" }]
+keywords = ["pytest", "importtime", "startup", "collection", "performance"]
+classifiers = [
+    "Framework :: Pytest",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+]
+dependencies = ["pytest>=7.0"]
+
+[project.urls]
+Homepage = "https://github.com/CAOShurong/pytest-importcost"
+Repository = "https://github.com/CAOShurong/pytest-importcost"
+
+[project.scripts]
+importcost = "pytest_importcost.cli:main"
+
+[project.entry-points.pytest11]
+importcost = "pytest_importcost.plugin"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --tb=short"
+pythonpath = ["src"]
