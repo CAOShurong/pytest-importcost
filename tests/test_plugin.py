@@ -28,6 +28,8 @@ def test_strip_importcost_args_drops_flags_and_values():
             "pandas,torch",
             "--importcost-repeat",
             "3",
+            "--importcost-blame",
+            "--importcost-plugins",
             "tests",
             "-q",
         ]

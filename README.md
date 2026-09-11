@@ -46,6 +46,18 @@ Import-time is wall-clock; a single run will flake a tight CI budget.
 `--importcost-forbid pandas,torch` fails if those packages appear at all — a
 budget of 800 ms still passes when someone puts `import torch` in `conftest.py`
 on a fast CI runner; a forbid list does not.
+`--importcost-blame` adds the conftest or test file that **first imported**
+each package, plus a by-file rollup. That is the difference between "pandas
+is expensive" and "tests/test_ml.py imported pandas at collection time":
+
+```text
+By file (new packages first seen there)
+  (collection startup)               74.0 ms  _pytest, pygments
+  examples/blame_suite/conftest.py    0.38 ms  pkg_from_conf
+  examples/blame_suite/test_a.py      0.34 ms  pkg_from_case
+```
+
+`(collection startup)` is pytest itself. The next rows are the files you can edit.
 
 The CLI is the same flags without the `importcost-` prefix:
 
@@ -53,6 +65,7 @@ The CLI is the same flags without the `importcost-` prefix:
 importcost --budget-ms 500 --json -- examples/
 importcost --repeat 5 --budget-ms 500 -- examples/
 importcost --forbid pandas,torch -- examples/
+importcost --blame --hide-stdlib -- examples/blame_suite/
 importcost --save before.json -- examples/
 importcost --compare before.json --slower-ms 50 -- examples/
 ```
@@ -69,7 +82,7 @@ collection imports never show up there.
 
 ## Notes
 
-- Child run is `--collect-only`. Tests are not executed in the measured process.
+- Child run is `--collect-only --capture=no`. Tests are not executed in the measured process. pytest capture otherwise redirects fd 2 and hides `-X importtime` for the suite.
 - Globally installed pytest plugins are **excluded** by default (`PYTEST_DISABLE_PLUGIN_AUTOLOAD`), so you see the suite, not hypothesis/xdist sitting in site-packages. Pass `importcost --plugins` to include them — that dump is often why "pytest is slow on my laptop".
 - Pytest exit code 5 (no tests) is treated as a successful measurement.
 - Requires CPython (uses `-X importtime`).

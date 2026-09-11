@@ -105,3 +105,51 @@ def test_cli_forbid_unknown_exits_zero(capsys):
     rc = main(["--forbid", "definitely_not_imported_xyz", "--", str(FIXTURE)])
     capsys.readouterr()
     assert rc == 0
+
+
+BLAME = Path(__file__).resolve().parents[1] / "examples" / "blame_suite"
+
+
+def test_suite_imports_survive_pytest_capture():
+    """Child must disable capture or -X importtime never sees the suite."""
+    report, code = measured_collect(
+        [str(BLAME)], timeout=60, hide_stdlib=True, limit=50
+    )
+    assert code in (0, 5)
+    assert "pkg_from_conf" in report
+    assert "pkg_from_case" in report
+
+
+def test_blame_pins_helpers_to_suite_files():
+    report, code = measured_collect(
+        [str(BLAME)], timeout=60, blame=True, hide_stdlib=True, limit=50
+    )
+    assert code in (0, 5)
+    blob = report.replace("\\", "/")
+    assert "pkg_from_conf" in blob
+    assert "pkg_from_case" in blob
+    assert "conftest.py" in blob
+    assert "test_a.py" in blob
+    assert "By file" in blob
+
+
+def test_blame_json_importers():
+    report, code = measured_collect(
+        [str(BLAME)], timeout=60, blame=True, as_json=True, hide_stdlib=True
+    )
+    payload = json.loads(report)
+    assert code in (0, 5)
+    importers = {
+        name: (path or "").replace("\\", "/")
+        for name, path in (payload.get("importers") or {}).items()
+    }
+    assert "conftest.py" in importers.get("pkg_from_conf", "")
+    assert "test_a.py" in importers.get("pkg_from_case", "")
+
+
+def test_cli_blame(capsys):
+    rc = main(["--blame", "--hide-stdlib", "--limit", "50", "--", str(BLAME)])
+    out = capsys.readouterr().out.replace("\\", "/")
+    assert rc == 0
+    assert "pkg_from_conf" in out
+    assert "conftest.py" in out

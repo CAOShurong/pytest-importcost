@@ -108,6 +108,13 @@ def format_ms(us: int) -> str:
     return f"{ms:.2f} ms"
 
 
+def short_importer(path: str, width: int = 40) -> str:
+    text = path.replace("\\", "/")
+    if len(text) <= width:
+        return text
+    return "…" + text[-(width - 1) :]
+
+
 def render_report(
     costs: dict[str, int],
     *,
@@ -117,6 +124,7 @@ def render_report(
     repeat: int = 1,
     min_us: int | None = None,
     max_us: int | None = None,
+    importers: dict[str, str] | None = None,
 ) -> str:
     shown_total = sum(costs.values())
     total = shown_total if total_us is None else total_us
@@ -132,12 +140,17 @@ def render_report(
         lines.append("")
     top = ranked[:limit]
     peak = top[0][1] if top else 1
+    show_blame = bool(importers)
     for name, us in top:
         frac = us / peak if peak else 0.0
         filled = int(round(frac * bar_w))
         bar = "█" * filled + "░" * (bar_w - filled)
         share = (us / total * 100.0) if total else 0.0
-        lines.append(f"  {name:{width}s}  {bar}  {format_ms(us):>8s}  {share:4.1f}%")
+        row = f"  {name:{width}s}  {bar}  {format_ms(us):>8s}  {share:4.1f}%"
+        if show_blame:
+            who = (importers or {}).get(name, "(collection startup)")
+            row += f"  {short_importer(who)}"
+        lines.append(row)
     leftover = ranked[limit:]
     if leftover:
         other = sum(us for _, us in leftover)
@@ -145,11 +158,50 @@ def render_report(
             f"  {'(others)':{width}s}  {'':{bar_w}s}  {format_ms(other):>8s}  "
             f"{other / total * 100.0:4.1f}%"
         )
+    if show_blame:
+        lines.append("")
+        lines.extend(_render_by_file(costs, importers or {}, total=total, limit=limit))
     lines.append("")
     lines.append(
         "This is CPython import-time of `pytest --collect-only`, not test runtime."
     )
+    if show_blame:
+        lines.append(
+            "The last column is the conftest/test file that first imported that package."
+        )
     return "\n".join(lines)
+
+
+def _render_by_file(
+    costs: dict[str, int],
+    importers: dict[str, str],
+    *,
+    total: int,
+    limit: int,
+) -> list[str]:
+    from .blame import file_costs
+
+    ranked = file_costs(costs, importers)
+    if not ranked:
+        return []
+    width = max(len(label) for label, _, _ in ranked[:limit])
+    width = min(max(width, 8), 48)
+    lines = ["By file (new packages first seen there)", ""]
+    for label, us, names in ranked[:limit]:
+        share = (us / total * 100.0) if total else 0.0
+        hint = ", ".join(names[:3])
+        extra = f"  {hint}" if hint else ""
+        lines.append(
+            f"  {short_importer(label, width):{width}s}  {format_ms(us):>8s}  "
+            f"{share:4.1f}%{extra}"
+        )
+    if len(ranked) > limit:
+        other = sum(us for _, us, _ in ranked[limit:])
+        lines.append(
+            f"  {'(others)':{width}s}  {format_ms(other):>8s}  "
+            f"{other / total * 100.0:4.1f}%"
+        )
+    return lines
 
 
 def parse_forbid_names(raw: str | None) -> list[str]:
@@ -203,6 +255,7 @@ def render_json(
     repeat: int = 1,
     min_us: int | None = None,
     max_us: int | None = None,
+    importers: dict[str, str] | None = None,
 ) -> str:
     shown_total = sum(costs.values())
     total = shown_total if total_us is None else total_us
@@ -210,6 +263,7 @@ def render_json(
     total_ms = total / 1000.0
     top = ranked if limit <= 0 else ranked[:limit]
     hits = list(forbidden or [])
+    who = importers or {}
     payload = {
         "total_us": total,
         "total_ms": round(total_ms, 3),
@@ -226,12 +280,14 @@ def render_json(
         "repeat": repeat,
         "min_us": min_us,
         "max_us": max_us,
+        "importers": who or None,
         "rows": [
             {
                 "name": name,
                 "self_us": us,
                 "self_ms": round(us / 1000.0, 3),
                 "share": (us / total) if total else 0.0,
+                "importer": who.get(name),
             }
             for name, us in top
         ],

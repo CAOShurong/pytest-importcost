@@ -83,6 +83,11 @@ def main(argv: list[str] | None = None) -> int:
         metavar="N",
         help="run collection N times and rank the median (default: 1)",
     )
+    parser.add_argument(
+        "--blame",
+        action="store_true",
+        help="show which conftest/test file first imported each package",
+    )
     args = parser.parse_args(argv)
     rest = list(args.pytest_args)
     if rest[:1] == ["--"]:
@@ -105,6 +110,7 @@ def main(argv: list[str] | None = None) -> int:
             slower_ms=args.slower_ms,
             forbid=parse_forbid_names(args.forbid),
             repeat=max(1, args.repeat),
+            blame=bool(args.blame),
         )
     except subprocess.TimeoutExpired as exc:
         print(f"importcost: timed out: {exc}", file=sys.stderr)

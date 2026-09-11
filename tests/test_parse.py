@@ -1,5 +1,6 @@
 import json
 
+from pytest_importcost.blame import extract_blame, file_costs
 from pytest_importcost.parse import (
     costs_from_saved,
     diff_profiles,
@@ -14,6 +15,7 @@ from pytest_importcost.parse import (
     render_forbid,
     render_json,
     render_report,
+    short_importer,
 )
 
 
@@ -126,6 +128,51 @@ def test_median_cost_map_fills_missing_with_zero():
     merged = median_cost_map([{"pandas": 100, "json": 10}, {"pandas": 300}])
     assert merged["pandas"] == 200
     assert merged["json"] == 5
+
+
+def test_extract_blame_reads_marker_line():
+    blob = "noise\npytest-importcost-blame:{\"json\":\"examples/tiny_suite/conftest.py\"}\n"
+    assert extract_blame(blob)["json"] == "examples/tiny_suite/conftest.py"
+    assert extract_blame("no marker") == {}
+
+
+def test_render_report_appends_importer_column():
+    text = render_report(
+        {"pandas": 400_000, "json": 50_000},
+        importers={"pandas": "tests/conftest.py", "json": "(collection startup)"},
+    )
+    assert "tests/conftest.py" in text
+    assert "By file" in text
+    assert "first imported" in text
+
+
+def test_file_costs_groups_by_importer():
+    ranked = file_costs(
+        {"pandas": 4000, "json": 100, "os": 50},
+        {"pandas": "conftest.py", "json": "test_a.py"},
+    )
+    assert ranked[0][0] == "conftest.py"
+    assert ranked[0][1] == 4000
+    labels = [row[0] for row in ranked]
+    assert "(collection startup)" in labels
+
+
+def test_short_importer_truncates_long_paths():
+    assert short_importer("conftest.py") == "conftest.py"
+    long = "a/" * 40 + "conftest.py"
+    assert short_importer(long, 20).startswith("…")
+    assert short_importer(long, 20).endswith("conftest.py")
+
+
+def test_render_json_includes_importer():
+    payload = json.loads(
+        render_json(
+            {"pandas": 4000},
+            importers={"pandas": "tests/conftest.py"},
+        )
+    )
+    assert payload["rows"][0]["importer"] == "tests/conftest.py"
+    assert payload["importers"]["pandas"] == "tests/conftest.py"
 
 
 def test_render_json_forbid_fields():

@@ -12,6 +12,8 @@ _BOOL_FLAGS = {
     "--importcost-json",
     "--importcost-modules",
     "--importcost-hide-stdlib",
+    "--importcost-blame",
+    "--importcost-plugins",
 }
 _VALUE_FLAGS = {
     "--importcost-budget-ms",
@@ -116,6 +118,18 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=1,
         help="run collection N times and rank the median (default: 1)",
     )
+    group.addoption(
+        "--importcost-blame",
+        action="store_true",
+        default=False,
+        help="show which conftest/test file first imported each package",
+    )
+    group.addoption(
+        "--importcost-plugins",
+        action="store_true",
+        default=False,
+        help="include globally installed pytest plugins in the measured child",
+    )
 
 
 def _requested(config: pytest.Config) -> bool:
@@ -129,6 +143,8 @@ def _requested(config: pytest.Config) -> bool:
         or config.getoption("importcost_compare")
         or config.getoption("importcost_forbid")
         or int(config.getoption("importcost_repeat") or 1) > 1
+        or config.getoption("importcost_blame")
+        or config.getoption("importcost_plugins")
     )
 
 
@@ -141,6 +157,9 @@ def pytest_cmdline_main(config: pytest.Config) -> int | None:
 
     from .parse import parse_forbid_names
     from .run import measured_collect
+
+    if config.getoption("importcost_plugins"):
+        os.environ["IMPORTCOST_PLUGINS"] = "1"
 
     child_args = strip_importcost_args(list(config.invocation_params.args))
     report, code = measured_collect(
@@ -156,7 +175,48 @@ def pytest_cmdline_main(config: pytest.Config) -> int | None:
         slower_ms=config.getoption("importcost_slower_ms"),
         forbid=parse_forbid_names(config.getoption("importcost_forbid")),
         repeat=max(1, int(config.getoption("importcost_repeat") or 1)),
+        blame=bool(config.getoption("importcost_blame")),
     )
     sys.stdout.write(report + "\n")
     # 5 = pytest "no tests collected"; still a successful measurement.
     return 0 if code in (0, 5) else code
+
+
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_load_initial_conftests(early_config, parser, args):
+    from .blame import tracker
+
+    state = tracker()
+    if state is None:
+        yield
+        return
+    # Anything already imported is pytest itself, not the suite.
+    state.mark_seen()
+    state.watch_conftest(True)
+    try:
+        yield
+    finally:
+        state.watch_conftest(False)
+        # Swallow pytest's own imports during this window; conftest-caused
+        # names were recorded by the meta_path finder.
+        state.mark_seen()
+
+
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_make_collect_report(collector: object):
+    from .blame import tracker
+
+    state = tracker()
+    if state is None:
+        yield
+        return
+    yield
+    state.snap(collector)
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    from .blame import tracker
+
+    state = tracker()
+    if state is not None:
+        state.emit()

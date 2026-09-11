@@ -20,4 +20,6 @@ jobs:
       - run: python -m pytest --importcost examples/tiny_suite
       - run: python -m pytest --importcost --importcost-budget-ms 10000 examples/tiny_suite
       - run: python -m pytest --importcost --importcost-forbid definitely_not_imported_xyz examples/tiny_suite
+      - run: python -m pytest --importcost --importcost-blame examples/blame_suite
       - run: importcost --json -- examples/tiny_suite
+      - run: importcost --blame --hide-stdlib -- examples/blame_suite

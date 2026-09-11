@@ -8,6 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .blame import extract_blame
 from .parse import (
     ParseError,
     costs_from_saved,
@@ -31,17 +32,28 @@ def _collect_once(
     python: str | None,
     timeout: float,
     modules: bool,
-) -> tuple[dict[str, int] | None, int, str]:
+    blame: bool = False,
+) -> tuple[dict[str, int] | None, int, str, dict[str, str]]:
     """One ``pytest --collect-only`` under ``-X importtime``.
 
-    Returns ``(costs, child_exit, error_text)``. ``costs`` is None on parse failure.
+    Returns ``(costs, child_exit, error_text, importers)``. ``costs`` is None
+    on parse failure.
     """
     exe = python or sys.executable
     args = ["--collect-only", "-q"]
+    if blame:
+        # Child must load this plugin so collector snapshots can run.
+        args.extend(["-p", "pytest_importcost.plugin"])
     if pytest_args:
         args.extend(pytest_args)
+    # Capture redirects fd 2, which swallows CPython ``-X importtime``
+    # lines for conftest and test-module imports. Force it off last so a
+    # user ``--capture=sys`` cannot hide the suite.
+    args.append("--capture=no")
     env = os.environ.copy()
     env["_PYTEST_IMPORTCOST_CHILD"] = "1"
+    if blame:
+        env["_PYTEST_IMPORTCOST_BLAME"] = "1"
     # Autoloaded site plugins (hypothesis, cov, xdist, …) dominate a
     # developer machine and hide the suite's own imports. Default off;
     # pass --importcost-plugins (CLI) / env IMPORTCOST_PLUGINS=1 to include.
@@ -65,8 +77,9 @@ def _collect_once(
         msg = f"importcost: {exc}"
         if extra:
             msg += "\n" + extra[-2000:]
-        return None, proc.returncode or 1, msg
-    return costs, proc.returncode, ""
+        return None, proc.returncode or 1, msg, {}
+    importers = extract_blame(blob) if blame else {}
+    return costs, proc.returncode, "", importers
 
 
 def measured_collect(
@@ -84,23 +97,28 @@ def measured_collect(
     slower_ms: float | None = None,
     forbid: list[str] | None = None,
     repeat: int = 1,
+    blame: bool = False,
 ) -> tuple[str, int]:
     """Return (report text, exit code). Exit 1 on budget / forbid / --slower-ms."""
     n = max(1, int(repeat))
     maps: list[dict[str, int]] = []
     totals: list[int] = []
     child_code = 0
+    importers: dict[str, str] = {}
     for _ in range(n):
-        costs, code, err = _collect_once(
+        costs, code, err, found = _collect_once(
             pytest_args,
             python=python,
             timeout=timeout,
             modules=modules,
+            blame=blame,
         )
         if costs is None:
             return err, code
         maps.append(costs)
         totals.append(sum(costs.values()))
+        if found and not importers:
+            importers = found
         if code not in (0, 5):
             child_code = code
 
@@ -110,10 +128,17 @@ def measured_collect(
     max_total = max(totals)
     display = drop_stdlib(costs) if hide_stdlib else costs
     unit = "modules" if modules else "packages"
+    blame_map = importers if blame else None
     if save_path:
         try:
             Path(save_path).write_text(
-                render_json(display, limit=0, total_us=raw_total, unit=unit),
+                render_json(
+                    display,
+                    limit=0,
+                    total_us=raw_total,
+                    unit=unit,
+                    importers=blame_map,
+                ),
                 encoding="utf-8",
             )
         except OSError as exc:
@@ -153,6 +178,7 @@ def measured_collect(
             repeat=n,
             min_us=min_total if n > 1 else None,
             max_us=max_total if n > 1 else None,
+            importers=blame_map,
         )
         if compare_blob:
             payload = json.loads(report)
@@ -168,6 +194,7 @@ def measured_collect(
             repeat=n,
             min_us=min_total if n > 1 else None,
             max_us=max_total if n > 1 else None,
+            importers=blame_map,
         )
         if hide_stdlib:
             report += "\nStdlib names omitted from rows; total still includes them."
