@@ -20,6 +20,7 @@ _VALUE_FLAGS = {
     "--importcost-compare",
     "--importcost-slower-ms",
     "--importcost-forbid",
+    "--importcost-repeat",
 }
 
 
@@ -108,6 +109,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=None,
         help="fail if these packages are imported during collection (comma-separated)",
     )
+    group.addoption(
+        "--importcost-repeat",
+        action="store",
+        type=int,
+        default=1,
+        help="run collection N times and rank the median (default: 1)",
+    )
 
 
 def _requested(config: pytest.Config) -> bool:
@@ -120,6 +128,7 @@ def _requested(config: pytest.Config) -> bool:
         or config.getoption("importcost_save")
         or config.getoption("importcost_compare")
         or config.getoption("importcost_forbid")
+        or int(config.getoption("importcost_repeat") or 1) > 1
     )
 
 
@@ -146,6 +155,7 @@ def pytest_cmdline_main(config: pytest.Config) -> int | None:
         compare_path=config.getoption("importcost_compare"),
         slower_ms=config.getoption("importcost_slower_ms"),
         forbid=parse_forbid_names(config.getoption("importcost_forbid")),
+        repeat=max(1, int(config.getoption("importcost_repeat") or 1)),
     )
     sys.stdout.write(report + "\n")
     # 5 = pytest "no tests collected"; still a successful measurement.

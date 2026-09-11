@@ -90,6 +90,17 @@ def test_forbid_json_fails_because_pytest_imports_it():
     assert "json" in report
 
 
+def test_repeat_median_json_fields():
+    report, code = measured_collect(
+        [str(FIXTURE)], timeout=60, as_json=True, repeat=2
+    )
+    payload = json.loads(report)
+    assert code == 0
+    assert payload["repeat"] == 2
+    assert payload["min_us"] <= payload["total_us"] <= payload["max_us"]
+    assert payload["total_us"] > 0
+
+
 def test_cli_forbid_unknown_exits_zero(capsys):
     rc = main(["--forbid", "definitely_not_imported_xyz", "--", str(FIXTURE)])
     capsys.readouterr()

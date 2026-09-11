@@ -80,6 +80,25 @@ def drop_stdlib(costs: dict[str, int]) -> dict[str, int]:
     return {k: v for k, v in costs.items() if k.split(".", 1)[0] not in std}
 
 
+def median_us(values: list[int]) -> int:
+    """Integer median. Even length uses the lower middle (no float ms)."""
+    if not values:
+        return 0
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) // 2
+
+
+def median_cost_map(maps: list[dict[str, int]]) -> dict[str, int]:
+    """Per-name median; missing keys count as 0."""
+    keys: set[str] = set()
+    for mapping in maps:
+        keys.update(mapping)
+    return {name: median_us([mapping.get(name, 0) for mapping in maps]) for name in keys}
+
+
 def format_ms(us: int) -> str:
     ms = us / 1000.0
     if ms >= 100:
@@ -95,16 +114,22 @@ def render_report(
     limit: int = 12,
     total_us: int | None = None,
     unit: str = "packages",
+    repeat: int = 1,
+    min_us: int | None = None,
+    max_us: int | None = None,
 ) -> str:
     shown_total = sum(costs.values())
     total = shown_total if total_us is None else total_us
     ranked = sorted(costs.items(), key=lambda item: item[1], reverse=True)
     width = max((len(name) for name, _ in ranked[:limit]), default=8)
     bar_w = 28
-    lines = [
-        f"pytest collection import cost  {format_ms(total)}  across {len(costs)} {unit}",
-        "",
-    ]
+    head = f"pytest collection import cost  {format_ms(total)}  across {len(costs)} {unit}"
+    if repeat > 1:
+        head += f"  (median of {repeat})"
+    lines = [head, ""]
+    if repeat > 1 and min_us is not None and max_us is not None:
+        lines.append(f"  runs  min {format_ms(min_us)}  max {format_ms(max_us)}")
+        lines.append("")
     top = ranked[:limit]
     peak = top[0][1] if top else 1
     for name, us in top:
@@ -175,6 +200,9 @@ def render_json(
     budget_ms: float | None = None,
     forbid: list[str] | None = None,
     forbidden: list[tuple[str, int]] | None = None,
+    repeat: int = 1,
+    min_us: int | None = None,
+    max_us: int | None = None,
 ) -> str:
     shown_total = sum(costs.values())
     total = shown_total if total_us is None else total_us
@@ -195,6 +223,9 @@ def render_json(
             for name, us in hits
         ],
         "forbid_ok": None if not (forbid or []) else not hits,
+        "repeat": repeat,
+        "min_us": min_us,
+        "max_us": max_us,
         "rows": [
             {
                 "name": name,

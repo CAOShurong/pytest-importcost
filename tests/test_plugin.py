@@ -26,6 +26,8 @@ def test_strip_importcost_args_drops_flags_and_values():
             "50",
             "--importcost-forbid",
             "pandas,torch",
+            "--importcost-repeat",
+            "3",
             "tests",
             "-q",
         ]

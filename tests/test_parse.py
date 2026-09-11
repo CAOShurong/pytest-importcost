@@ -5,6 +5,8 @@ from pytest_importcost.parse import (
     diff_profiles,
     drop_stdlib,
     forbidden_hits,
+    median_cost_map,
+    median_us,
     parse_forbid_names,
     parse_package_self_us,
     parse_self_us,
@@ -112,6 +114,18 @@ def test_forbidden_hits_matches_top_level_and_submodule():
     assert hits[0][1] == 4800
     assert all(name != "json" for name, _ in hits)
     assert "forbidden imports" in render_forbid(hits)
+
+
+def test_median_us_odd_and_even():
+    assert median_us([3, 1, 2]) == 2
+    assert median_us([4, 1, 2, 3]) == 2
+    assert median_us([]) == 0
+
+
+def test_median_cost_map_fills_missing_with_zero():
+    merged = median_cost_map([{"pandas": 100, "json": 10}, {"pandas": 300}])
+    assert merged["pandas"] == 200
+    assert merged["json"] == 5
 
 
 def test_render_json_forbid_fields():

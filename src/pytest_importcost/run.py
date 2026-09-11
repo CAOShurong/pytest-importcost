@@ -15,6 +15,8 @@ from .parse import (
     drop_stdlib,
     forbidden_hits,
     format_ms,
+    median_cost_map,
+    median_us,
     parse_self_us,
     render_compare,
     render_forbid,
@@ -23,22 +25,17 @@ from .parse import (
 )
 
 
-def measured_collect(
-    pytest_args: list[str] | None = None,
+def _collect_once(
+    pytest_args: list[str] | None,
     *,
-    python: str | None = None,
-    timeout: float = 180.0,
-    limit: int = 12,
-    hide_stdlib: bool = False,
-    modules: bool = False,
-    budget_ms: float | None = None,
-    as_json: bool = False,
-    save_path: str | None = None,
-    compare_path: str | None = None,
-    slower_ms: float | None = None,
-    forbid: list[str] | None = None,
-) -> tuple[str, int]:
-    """Return (report text, exit code). Exit 1 on budget / forbid / --slower-ms."""
+    python: str | None,
+    timeout: float,
+    modules: bool,
+) -> tuple[dict[str, int] | None, int, str]:
+    """One ``pytest --collect-only`` under ``-X importtime``.
+
+    Returns ``(costs, child_exit, error_text)``. ``costs`` is None on parse failure.
+    """
     exe = python or sys.executable
     args = ["--collect-only", "-q"]
     if pytest_args:
@@ -68,9 +65,49 @@ def measured_collect(
         msg = f"importcost: {exc}"
         if extra:
             msg += "\n" + extra[-2000:]
-        return msg, proc.returncode or 1
+        return None, proc.returncode or 1, msg
+    return costs, proc.returncode, ""
 
-    raw_total = sum(costs.values())
+
+def measured_collect(
+    pytest_args: list[str] | None = None,
+    *,
+    python: str | None = None,
+    timeout: float = 180.0,
+    limit: int = 12,
+    hide_stdlib: bool = False,
+    modules: bool = False,
+    budget_ms: float | None = None,
+    as_json: bool = False,
+    save_path: str | None = None,
+    compare_path: str | None = None,
+    slower_ms: float | None = None,
+    forbid: list[str] | None = None,
+    repeat: int = 1,
+) -> tuple[str, int]:
+    """Return (report text, exit code). Exit 1 on budget / forbid / --slower-ms."""
+    n = max(1, int(repeat))
+    maps: list[dict[str, int]] = []
+    totals: list[int] = []
+    child_code = 0
+    for _ in range(n):
+        costs, code, err = _collect_once(
+            pytest_args,
+            python=python,
+            timeout=timeout,
+            modules=modules,
+        )
+        if costs is None:
+            return err, code
+        maps.append(costs)
+        totals.append(sum(costs.values()))
+        if code not in (0, 5):
+            child_code = code
+
+    costs = maps[0] if n == 1 else median_cost_map(maps)
+    raw_total = totals[0] if n == 1 else median_us(totals)
+    min_total = min(totals)
+    max_total = max(totals)
     display = drop_stdlib(costs) if hide_stdlib else costs
     unit = "modules" if modules else "packages"
     if save_path:
@@ -113,6 +150,9 @@ def measured_collect(
             budget_ms=budget_ms,
             forbid=forbid,
             forbidden=hits,
+            repeat=n,
+            min_us=min_total if n > 1 else None,
+            max_us=max_total if n > 1 else None,
         )
         if compare_blob:
             payload = json.loads(report)
@@ -121,7 +161,13 @@ def measured_collect(
             report = json.dumps(payload, indent=2)
     else:
         report = render_report(
-            display, limit=limit, total_us=raw_total, unit=unit
+            display,
+            limit=limit,
+            total_us=raw_total,
+            unit=unit,
+            repeat=n,
+            min_us=min_total if n > 1 else None,
+            max_us=max_total if n > 1 else None,
         )
         if hide_stdlib:
             report += "\nStdlib names omitted from rows; total still includes them."
@@ -130,7 +176,7 @@ def measured_collect(
         if compare_blob:
             report = report.rstrip() + "\n\n" + compare_blob
 
-    code = 0 if proc.returncode in (0, 5) else proc.returncode
+    code = child_code
     if budget_ms is not None and raw_total / 1000.0 > budget_ms:
         line = (
             f"importcost: budget exceeded: {format_ms(raw_total)} > {budget_ms:g} ms"

@@ -76,6 +76,13 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="fail if these packages are imported during collection (comma-separated)",
     )
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        metavar="N",
+        help="run collection N times and rank the median (default: 1)",
+    )
     args = parser.parse_args(argv)
     rest = list(args.pytest_args)
     if rest[:1] == ["--"]:
@@ -97,6 +104,7 @@ def main(argv: list[str] | None = None) -> int:
             compare_path=args.compare,
             slower_ms=args.slower_ms,
             forbid=parse_forbid_names(args.forbid),
+            repeat=max(1, args.repeat),
         )
     except subprocess.TimeoutExpired as exc:
         print(f"importcost: timed out: {exc}", file=sys.stderr)

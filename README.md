@@ -34,7 +34,11 @@ fast runner):
 ```bash
 pytest --importcost --importcost-budget-ms 500
 pytest --importcost --importcost-forbid pandas,torch
+pytest --importcost --importcost-repeat 5 --importcost-budget-ms 500
 ```
+
+`--importcost-repeat 5` runs collection five times and ranks the **median**.
+Import-time is wall-clock; a single run will flake a tight CI budget.
 
 `--importcost-json` prints `{total_ms, rows, budget_ok}` instead of the table.
 `--importcost-modules` ranks `pandas.core` rather than rolling it into `pandas`.
@@ -47,6 +51,7 @@ The CLI is the same flags without the `importcost-` prefix:
 
 ```bash
 importcost --budget-ms 500 --json -- examples/
+importcost --repeat 5 --budget-ms 500 -- examples/
 importcost --forbid pandas,torch -- examples/
 importcost --save before.json -- examples/
 importcost --compare before.json --slower-ms 50 -- examples/
