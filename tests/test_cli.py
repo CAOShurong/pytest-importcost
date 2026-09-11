@@ -1,4 +1,5 @@
 import json
+import tempfile
 from pathlib import Path
 
 from pytest_importcost.cli import main
@@ -44,6 +45,24 @@ def test_json_output_is_object():
     assert payload["total_us"] > 0
     assert payload["rows"]
     assert payload["grouped_by"] == "package"
+
+
+def test_save_and_compare_same_suite():
+    with tempfile.TemporaryDirectory() as tmp:
+        baseline = Path(tmp) / "before.json"
+        report, code = measured_collect(
+            [str(FIXTURE)], timeout=60, save_path=str(baseline)
+        )
+        assert code == 0
+        assert baseline.is_file()
+        report, code = measured_collect(
+            [str(FIXTURE)],
+            timeout=60,
+            compare_path=str(baseline),
+            slower_ms=1_000_000,
+        )
+        assert code == 0
+        assert "compared with saved profile" in report
 
 
 def test_cli_json_and_modules(capsys):

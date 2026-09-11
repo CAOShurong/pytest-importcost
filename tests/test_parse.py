@@ -1,9 +1,11 @@
 import json
 
 from pytest_importcost.parse import (
+    costs_from_saved,
     drop_stdlib,
     parse_package_self_us,
     parse_self_us,
+    render_compare,
     render_json,
     render_report,
 )
@@ -56,3 +58,18 @@ def test_render_json_budget_fields():
     assert payload["budget_ms"] == 100.0
     assert payload["budget_ok"] is False
     assert payload["rows"][0]["name"] == "pandas"
+
+
+def test_compare_reports_new_and_gone_packages():
+    text = render_compare({"pandas": 4000, "json": 100}, {"json": 100, "os": 50})
+    assert "newly imported" in text
+    assert "pandas" in text
+    assert "no longer imported" in text
+    assert "os" in text
+
+
+def test_costs_from_saved_json_payload():
+    payload = json.loads(render_json({"pandas": 4000, "json": 100}, limit=0))
+    total, costs = costs_from_saved(payload)
+    assert total == 4100
+    assert costs["pandas"] == 4000

@@ -41,7 +41,12 @@ The CLI is the same flags without the `importcost-` prefix:
 
 ```bash
 importcost --budget-ms 500 --json -- examples/
+importcost --save before.json -- examples/
+importcost --compare before.json --slower-ms 50 -- examples/
 ```
+
+`--compare` prints newly imported packages. `--slower-ms` fails the job if
+total collection import cost grew by more than that many milliseconds.
 
 ## Why it exists
 

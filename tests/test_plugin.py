@@ -19,6 +19,11 @@ def test_strip_importcost_args_drops_flags_and_values():
             "--importcost-budget-ms",
             "200",
             "--importcost-limit=5",
+            "--importcost-save",
+            "before.json",
+            "--importcost-compare=before.json",
+            "--importcost-slower-ms",
+            "50",
             "tests",
             "-q",
         ]

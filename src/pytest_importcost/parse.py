@@ -139,6 +139,7 @@ def render_json(
     total = shown_total if total_us is None else total_us
     ranked = sorted(costs.items(), key=lambda item: item[1], reverse=True)
     total_ms = total / 1000.0
+    top = ranked if limit <= 0 else ranked[:limit]
     payload = {
         "total_us": total,
         "total_ms": round(total_ms, 3),
@@ -153,7 +154,53 @@ def render_json(
                 "self_ms": round(us / 1000.0, 3),
                 "share": (us / total) if total else 0.0,
             }
-            for name, us in ranked[:limit]
+            for name, us in top
         ],
     }
     return json.dumps(payload, indent=2)
+
+
+def costs_from_saved(data: dict) -> tuple[int, dict[str, int]]:
+    """Read a --json / --save payload (or a plain name→us map)."""
+    if "rows" in data:
+        costs = {str(row["name"]): int(row["self_us"]) for row in data["rows"]}
+        total = int(data.get("total_us") or sum(costs.values()))
+        return total, costs
+    costs = {str(k): int(v) for k, v in data.items() if isinstance(v, (int, float))}
+    return sum(costs.values()), costs
+
+
+def render_compare(
+    now: dict[str, int],
+    before: dict[str, int],
+    *,
+    now_total: int | None = None,
+    before_total: int | None = None,
+) -> str:
+    now_us = sum(now.values()) if now_total is None else now_total
+    before_us = sum(before.values()) if before_total is None else before_total
+    delta = now_us - before_us
+    if delta < 0:
+        arrow = "faster"
+    elif delta > 0:
+        arrow = "slower"
+    else:
+        arrow = "unchanged"
+    lines = [
+        f"compared with saved profile  before {format_ms(before_us)}  "
+        f"now {format_ms(now_us)}  {format_ms(abs(delta))} {arrow}",
+        "",
+    ]
+    added = sorted(set(now) - set(before), key=lambda n: now[n], reverse=True)
+    gone = sorted(set(before) - set(now), key=lambda n: before[n], reverse=True)
+    if added:
+        lines.append("  newly imported:")
+        for name in added[:8]:
+            lines.append(f"    {name:<24} +{format_ms(now[name])}")
+    if gone:
+        lines.append("  no longer imported:")
+        for name in gone[:8]:
+            lines.append(f"    {name:<24} -{format_ms(before[name])}")
+    if not added and not gone:
+        lines.append("  same package set")
+    return "\n".join(lines)

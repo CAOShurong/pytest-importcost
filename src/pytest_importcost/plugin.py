@@ -16,6 +16,9 @@ _BOOL_FLAGS = {
 _VALUE_FLAGS = {
     "--importcost-budget-ms",
     "--importcost-limit",
+    "--importcost-save",
+    "--importcost-compare",
+    "--importcost-slower-ms",
 }
 
 
@@ -79,6 +82,25 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="omit CPython stdlib names from the ranked rows",
     )
+    group.addoption(
+        "--importcost-save",
+        action="store",
+        default=None,
+        help="write the import-cost JSON for later --importcost-compare",
+    )
+    group.addoption(
+        "--importcost-compare",
+        action="store",
+        default=None,
+        help="diff against a profile saved with --importcost-save",
+    )
+    group.addoption(
+        "--importcost-slower-ms",
+        action="store",
+        type=float,
+        default=None,
+        help="with --importcost-compare, fail if total cost grew by more than this",
+    )
 
 
 def _requested(config: pytest.Config) -> bool:
@@ -88,6 +110,8 @@ def _requested(config: pytest.Config) -> bool:
         or config.getoption("importcost_json")
         or config.getoption("importcost_modules")
         or config.getoption("importcost_hide_stdlib")
+        or config.getoption("importcost_save")
+        or config.getoption("importcost_compare")
     )
 
 
@@ -109,6 +133,9 @@ def pytest_cmdline_main(config: pytest.Config) -> int | None:
         modules=bool(config.getoption("importcost_modules")),
         budget_ms=config.getoption("importcost_budget_ms"),
         as_json=bool(config.getoption("importcost_json")),
+        save_path=config.getoption("importcost_save"),
+        compare_path=config.getoption("importcost_compare"),
+        slower_ms=config.getoption("importcost_slower_ms"),
     )
     sys.stdout.write(report + "\n")
     # 5 = pytest "no tests collected"; still a successful measurement.

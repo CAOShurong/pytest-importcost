@@ -53,6 +53,22 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="omit CPython stdlib names from the ranked rows",
     )
+    parser.add_argument(
+        "--save",
+        metavar="FILE",
+        help="write the profile JSON for later --compare",
+    )
+    parser.add_argument(
+        "--compare",
+        metavar="FILE",
+        help="diff against a profile saved with --save",
+    )
+    parser.add_argument(
+        "--slower-ms",
+        type=float,
+        default=None,
+        help="with --compare, fail if total import cost grew by more than this",
+    )
     args = parser.parse_args(argv)
     rest = list(args.pytest_args)
     if rest[:1] == ["--"]:
@@ -70,6 +86,9 @@ def main(argv: list[str] | None = None) -> int:
             modules=args.modules,
             budget_ms=args.budget_ms,
             as_json=args.as_json,
+            save_path=args.save,
+            compare_path=args.compare,
+            slower_ms=args.slower_ms,
         )
     except subprocess.TimeoutExpired as exc:
         print(f"importcost: timed out: {exc}", file=sys.stderr)
