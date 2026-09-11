@@ -22,7 +22,11 @@ def measured_collect(
         args.extend(pytest_args)
     env = os.environ.copy()
     env["_PYTEST_IMPORTCOST_CHILD"] = "1"
-    # Keep pytest from loading this plugin in the child in a way that re-execs.
+    # Autoloaded site plugins (hypothesis, cov, xdist, …) dominate a
+    # developer machine and hide the suite's own imports. Default off;
+    # pass --importcost-plugins (CLI) / env IMPORTCOST_PLUGINS=1 to include.
+    if os.environ.get("IMPORTCOST_PLUGINS") != "1":
+        env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     proc = subprocess.run(
         [exe, "-X", "importtime", "-m", "pytest", *args],
         capture_output=True,
