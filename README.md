@@ -14,16 +14,34 @@ It re-runs `pytest --collect-only` under CPython `-X importtime` and prints pack
 Real output on this repo's tiny example suite (no pandas — pytest itself dominates):
 
 ```text
-pytest collection import cost  155 ms  across 149 packages
+pytest collection import cost  153 ms  across 149 packages
 
-  _pytest    ████████████████████████████   43.0 ms  27.8%
-  pygments   ██████░░░░░░░░░░░░░░░░░░░░░░   8.97 ms   5.8%
-  importlib  █████░░░░░░░░░░░░░░░░░░░░░░░   6.92 ms   4.5%
+  _pytest    ████████████████████████████   40.3 ms  26.4%
+  pygments   ██████░░░░░░░░░░░░░░░░░░░░░░   8.59 ms   5.6%
+  importlib  █████░░░░░░░░░░░░░░░░░░░░░░░   6.83 ms   4.5%
 ```
 
 If `conftest.py` imports pandas or torch, those names take the top rows.
 That number is **import time during collection**, not test runtime. The usual
 `python -X importtime -m pytest` dump is 900 nested lines; this is the table.
+
+## CI budget
+
+Fail the job when collection imports grow (someone added pandas to `conftest.py`):
+
+```bash
+pytest --importcost --importcost-budget-ms 500
+```
+
+`--importcost-json` prints `{total_ms, rows, budget_ok}` instead of the table.
+`--importcost-modules` ranks `pandas.core` rather than rolling it into `pandas`.
+`--importcost-hide-stdlib` drops `json`/`os` from the rows (the total still includes them).
+
+The CLI is the same flags without the `importcost-` prefix:
+
+```bash
+importcost --budget-ms 500 --json -- examples/
+```
 
 ## Why it exists
 

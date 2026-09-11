@@ -6,7 +6,14 @@ import os
 import subprocess
 import sys
 
-from .parse import ParseError, parse_package_self_us, render_report
+from .parse import (
+    ParseError,
+    drop_stdlib,
+    format_ms,
+    parse_self_us,
+    render_json,
+    render_report,
+)
 
 
 def measured_collect(
@@ -14,8 +21,13 @@ def measured_collect(
     *,
     python: str | None = None,
     timeout: float = 180.0,
+    limit: int = 12,
+    hide_stdlib: bool = False,
+    modules: bool = False,
+    budget_ms: float | None = None,
+    as_json: bool = False,
 ) -> tuple[str, int]:
-    """Return (report text, pytest exit code)."""
+    """Return (report text, exit code). Exit 1 if ``budget_ms`` is exceeded."""
     exe = python or sys.executable
     args = ["--collect-only", "-q"]
     if pytest_args:
@@ -39,11 +51,41 @@ def measured_collect(
     )
     blob = (proc.stderr or "") + "\n" + (proc.stdout or "")
     try:
-        costs = parse_package_self_us(blob)
+        costs = parse_self_us(blob, group="module" if modules else "package")
     except ParseError as exc:
         extra = (proc.stderr or proc.stdout or "").strip()
         msg = f"importcost: {exc}"
         if extra:
             msg += "\n" + extra[-2000:]
         return msg, proc.returncode or 1
-    return render_report(costs), proc.returncode
+
+    raw_total = sum(costs.values())
+    display = drop_stdlib(costs) if hide_stdlib else costs
+    unit = "modules" if modules else "packages"
+    if as_json:
+        report = render_json(
+            display,
+            limit=limit,
+            total_us=raw_total,
+            unit=unit,
+            budget_ms=budget_ms,
+        )
+    else:
+        report = render_report(
+            display, limit=limit, total_us=raw_total, unit=unit
+        )
+        if hide_stdlib:
+            report += "\nStdlib names omitted from rows; total still includes them."
+
+    code = 0 if proc.returncode in (0, 5) else proc.returncode
+    if budget_ms is not None and raw_total / 1000.0 > budget_ms:
+        line = (
+            f"importcost: budget exceeded: {format_ms(raw_total)} > {budget_ms:g} ms"
+        )
+        if as_json:
+            sys.stderr.write(line + "\n")
+        else:
+            report = report.rstrip() + "\n\n" + line
+        if code == 0:
+            code = 1
+    return report, code

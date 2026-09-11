@@ -25,6 +25,34 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="include globally installed pytest plugins (autoload)",
     )
+    parser.add_argument(
+        "--budget-ms",
+        type=float,
+        default=None,
+        help="fail if collection import cost exceeds this many milliseconds",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="as_json",
+        help="print machine-readable JSON instead of the table",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=12,
+        help="how many ranked rows to print (default: 12)",
+    )
+    parser.add_argument(
+        "--modules",
+        action="store_true",
+        help="rank full module names instead of top-level packages",
+    )
+    parser.add_argument(
+        "--hide-stdlib",
+        action="store_true",
+        help="omit CPython stdlib names from the ranked rows",
+    )
     args = parser.parse_args(argv)
     rest = list(args.pytest_args)
     if rest[:1] == ["--"]:
@@ -34,7 +62,15 @@ def main(argv: list[str] | None = None) -> int:
 
         os.environ["IMPORTCOST_PLUGINS"] = "1"
     try:
-        report, code = measured_collect(rest, python=args.python)
+        report, code = measured_collect(
+            rest,
+            python=args.python,
+            limit=args.limit,
+            hide_stdlib=args.hide_stdlib,
+            modules=args.modules,
+            budget_ms=args.budget_ms,
+            as_json=args.as_json,
+        )
     except subprocess.TimeoutExpired as exc:
         print(f"importcost: timed out: {exc}", file=sys.stderr)
         return 1

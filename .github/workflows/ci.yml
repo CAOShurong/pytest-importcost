@@ -18,4 +18,5 @@ jobs:
       - run: python -m pip install -e .
       - run: python -m pytest tests -q
       - run: python -m pytest --importcost examples/tiny_suite
-      - run: importcost -- examples/tiny_suite
+      - run: python -m pytest --importcost --importcost-budget-ms 10000 examples/tiny_suite
+      - run: importcost --json -- examples/tiny_suite
