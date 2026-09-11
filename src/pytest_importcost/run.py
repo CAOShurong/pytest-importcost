@@ -11,10 +11,13 @@ from pathlib import Path
 from .parse import (
     ParseError,
     costs_from_saved,
+    diff_profiles,
     drop_stdlib,
+    forbidden_hits,
     format_ms,
     parse_self_us,
     render_compare,
+    render_forbid,
     render_json,
     render_report,
 )
@@ -33,8 +36,9 @@ def measured_collect(
     save_path: str | None = None,
     compare_path: str | None = None,
     slower_ms: float | None = None,
+    forbid: list[str] | None = None,
 ) -> tuple[str, int]:
-    """Return (report text, exit code). Exit 1 if ``budget_ms`` is exceeded."""
+    """Return (report text, exit code). Exit 1 on budget / forbid / --slower-ms."""
     exe = python or sys.executable
     args = ["--collect-only", "-q"]
     if pytest_args:
@@ -79,6 +83,7 @@ def measured_collect(
             return f"importcost: could not write {save_path}: {exc}", 1
 
     compare_blob = None
+    compare_diff = None
     slower = False
     if compare_path:
         try:
@@ -86,6 +91,9 @@ def measured_collect(
             before_total, before = costs_from_saved(saved)
         except (OSError, ValueError, TypeError, KeyError) as exc:
             return f"importcost: could not read {compare_path}: {exc}", 1
+        compare_diff = diff_profiles(
+            display, before, now_total=raw_total, before_total=before_total
+        )
         compare_blob = render_compare(
             display, before, now_total=raw_total, before_total=before_total
         )
@@ -95,6 +103,7 @@ def measured_collect(
                 f"\nimportcost: slower than saved by more than {slower_ms:g} ms"
             )
 
+    hits = forbidden_hits(costs, forbid or [])
     if as_json:
         report = render_json(
             display,
@@ -102,10 +111,13 @@ def measured_collect(
             total_us=raw_total,
             unit=unit,
             budget_ms=budget_ms,
+            forbid=forbid,
+            forbidden=hits,
         )
         if compare_blob:
             payload = json.loads(report)
             payload["compare"] = compare_blob
+            payload["diff"] = compare_diff
             report = json.dumps(payload, indent=2)
     else:
         report = render_report(
@@ -123,6 +135,14 @@ def measured_collect(
         line = (
             f"importcost: budget exceeded: {format_ms(raw_total)} > {budget_ms:g} ms"
         )
+        if as_json:
+            sys.stderr.write(line + "\n")
+        else:
+            report = report.rstrip() + "\n\n" + line
+        if code == 0:
+            code = 1
+    if hits:
+        line = render_forbid(hits)
         if as_json:
             sys.stderr.write(line + "\n")
         else:

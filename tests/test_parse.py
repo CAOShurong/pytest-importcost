@@ -2,10 +2,14 @@ import json
 
 from pytest_importcost.parse import (
     costs_from_saved,
+    diff_profiles,
     drop_stdlib,
+    forbidden_hits,
+    parse_forbid_names,
     parse_package_self_us,
     parse_self_us,
     render_compare,
+    render_forbid,
     render_json,
     render_report,
 )
@@ -73,3 +77,52 @@ def test_costs_from_saved_json_payload():
     total, costs = costs_from_saved(payload)
     assert total == 4100
     assert costs["pandas"] == 4000
+
+
+def test_compare_reports_slower_and_faster_packages():
+    text = render_compare(
+        {"pandas": 8000, "json": 100, "pygments": 1500},
+        {"pandas": 4000, "json": 100, "pygments": 4000},
+    )
+    assert "slower:" in text
+    assert "pandas" in text
+    assert "faster:" in text
+    assert "pygments" in text
+
+
+def test_diff_profiles_ignores_sub_ms_jitter():
+    diff = diff_profiles({"pandas": 4050, "json": 100}, {"pandas": 4000, "json": 100})
+    assert diff["slower"] == []
+    assert diff["faster"] == []
+    assert diff["added"] == []
+
+
+def test_parse_forbid_names_splits_and_dedupes():
+    assert parse_forbid_names(" pandas, torch,pandas ") == ["pandas", "torch"]
+    assert parse_forbid_names("") == []
+    assert parse_forbid_names(None) == []
+
+
+def test_forbidden_hits_matches_top_level_and_submodule():
+    hits = forbidden_hits(
+        {"pandas": 4000, "pandas.core": 800, "json": 100},
+        ["pandas", "torch"],
+    )
+    assert hits[0][0] == "pandas"
+    assert hits[0][1] == 4800
+    assert all(name != "json" for name, _ in hits)
+    assert "forbidden imports" in render_forbid(hits)
+
+
+def test_render_json_forbid_fields():
+    payload = json.loads(
+        render_json(
+            {"pandas": 400_000, "json": 50_000},
+            budget_ms=100.0,
+            forbid=["pandas"],
+            forbidden=[("pandas", 400_000)],
+        )
+    )
+    assert payload["forbid"] == ["pandas"]
+    assert payload["forbid_ok"] is False
+    assert payload["forbidden"][0]["name"] == "pandas"

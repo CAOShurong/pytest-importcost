@@ -6,6 +6,7 @@ import argparse
 import subprocess
 import sys
 
+from .parse import parse_forbid_names
 from .run import measured_collect
 
 
@@ -69,6 +70,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="with --compare, fail if total import cost grew by more than this",
     )
+    parser.add_argument(
+        "--forbid",
+        metavar="PACKAGES",
+        default=None,
+        help="fail if these packages are imported during collection (comma-separated)",
+    )
     args = parser.parse_args(argv)
     rest = list(args.pytest_args)
     if rest[:1] == ["--"]:
@@ -89,6 +96,7 @@ def main(argv: list[str] | None = None) -> int:
             save_path=args.save,
             compare_path=args.compare,
             slower_ms=args.slower_ms,
+            forbid=parse_forbid_names(args.forbid),
         )
     except subprocess.TimeoutExpired as exc:
         print(f"importcost: timed out: {exc}", file=sys.stderr)

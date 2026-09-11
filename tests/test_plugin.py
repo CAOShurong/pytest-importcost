@@ -24,6 +24,8 @@ def test_strip_importcost_args_drops_flags_and_values():
             "--importcost-compare=before.json",
             "--importcost-slower-ms",
             "50",
+            "--importcost-forbid",
+            "pandas,torch",
             "tests",
             "-q",
         ]
@@ -59,3 +61,33 @@ def test_plugin_budget_fails_via_pytest():
     blob = (proc.stdout or "") + (proc.stderr or "")
     assert proc.returncode == 1, blob[-2000:]
     assert "budget exceeded" in blob
+
+
+def test_plugin_forbid_fails_via_pytest():
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(SRC)
+    env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+    env.pop("PYTEST_ADDOPTS", None)
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "pytest_importcost.plugin",
+            "--importcost",
+            "--importcost-forbid",
+            "json",
+            str(FIXTURE),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=str(Path(__file__).resolve().parents[1]),
+        env=env,
+        check=False,
+    )
+    blob = (proc.stdout or "") + (proc.stderr or "")
+    assert proc.returncode == 1, blob[-2000:]
+    assert "forbidden imports" in blob

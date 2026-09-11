@@ -19,6 +19,7 @@ _VALUE_FLAGS = {
     "--importcost-save",
     "--importcost-compare",
     "--importcost-slower-ms",
+    "--importcost-forbid",
 }
 
 
@@ -101,6 +102,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=None,
         help="with --importcost-compare, fail if total cost grew by more than this",
     )
+    group.addoption(
+        "--importcost-forbid",
+        action="store",
+        default=None,
+        help="fail if these packages are imported during collection (comma-separated)",
+    )
 
 
 def _requested(config: pytest.Config) -> bool:
@@ -112,6 +119,7 @@ def _requested(config: pytest.Config) -> bool:
         or config.getoption("importcost_hide_stdlib")
         or config.getoption("importcost_save")
         or config.getoption("importcost_compare")
+        or config.getoption("importcost_forbid")
     )
 
 
@@ -122,6 +130,7 @@ def pytest_cmdline_main(config: pytest.Config) -> int | None:
     if os.environ.get("_PYTEST_IMPORTCOST_CHILD") == "1":
         return None
 
+    from .parse import parse_forbid_names
     from .run import measured_collect
 
     child_args = strip_importcost_args(list(config.invocation_params.args))
@@ -136,6 +145,7 @@ def pytest_cmdline_main(config: pytest.Config) -> int | None:
         save_path=config.getoption("importcost_save"),
         compare_path=config.getoption("importcost_compare"),
         slower_ms=config.getoption("importcost_slower_ms"),
+        forbid=parse_forbid_names(config.getoption("importcost_forbid")),
     )
     sys.stdout.write(report + "\n")
     # 5 = pytest "no tests collected"; still a successful measurement.

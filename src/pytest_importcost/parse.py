@@ -127,6 +127,45 @@ def render_report(
     return "\n".join(lines)
 
 
+def parse_forbid_names(raw: str | None) -> list[str]:
+    """Split ``pandas,torch`` into distinct top-level names."""
+    if not raw:
+        return []
+    seen: list[str] = []
+    for part in raw.split(","):
+        name = part.strip()
+        if name and name not in seen:
+            seen.append(name)
+    return seen
+
+
+def forbidden_hits(costs: dict[str, int], names: list[str]) -> list[tuple[str, int]]:
+    """Packages (or modules) that match a ``--forbid`` name.
+
+    ``pandas`` matches both the top-level package and ``pandas.core``.
+    """
+    wanted = {n.strip() for n in names if n and n.strip()}
+    if not wanted:
+        return []
+    hits: dict[str, int] = {}
+    for name, us in costs.items():
+        top = name.split(".", 1)[0]
+        if name in wanted or top in wanted:
+            key = name if name in wanted else top
+            hits[key] = hits.get(key, 0) + us
+    return sorted(hits.items(), key=lambda item: item[1], reverse=True)
+
+
+def render_forbid(hits: list[tuple[str, int]]) -> str:
+    if not hits:
+        return ""
+    lines = ["importcost: forbidden imports during collection:"]
+    width = max(len(name) for name, _ in hits)
+    for name, us in hits:
+        lines.append(f"  {name:<{width}s}  {format_ms(us)}")
+    return "\n".join(lines)
+
+
 def render_json(
     costs: dict[str, int],
     *,
@@ -134,12 +173,15 @@ def render_json(
     total_us: int | None = None,
     unit: str = "packages",
     budget_ms: float | None = None,
+    forbid: list[str] | None = None,
+    forbidden: list[tuple[str, int]] | None = None,
 ) -> str:
     shown_total = sum(costs.values())
     total = shown_total if total_us is None else total_us
     ranked = sorted(costs.items(), key=lambda item: item[1], reverse=True)
     total_ms = total / 1000.0
     top = ranked if limit <= 0 else ranked[:limit]
+    hits = list(forbidden or [])
     payload = {
         "total_us": total,
         "total_ms": round(total_ms, 3),
@@ -147,6 +189,12 @@ def render_json(
         "grouped_by": "module" if unit == "modules" else "package",
         "budget_ms": budget_ms,
         "budget_ok": None if budget_ms is None else total_ms <= budget_ms,
+        "forbid": list(forbid or []),
+        "forbidden": [
+            {"name": name, "self_us": us, "self_ms": round(us / 1000.0, 3)}
+            for name, us in hits
+        ],
+        "forbid_ok": None if not (forbid or []) else not hits,
         "rows": [
             {
                 "name": name,
@@ -170,6 +218,51 @@ def costs_from_saved(data: dict) -> tuple[int, dict[str, int]]:
     return sum(costs.values()), costs
 
 
+# Ignore sub-millisecond jitter when ranking shared packages.
+_DELTA_FLOOR_US = 1000
+
+
+def diff_profiles(
+    now: dict[str, int],
+    before: dict[str, int],
+    *,
+    now_total: int | None = None,
+    before_total: int | None = None,
+) -> dict:
+    """Structured before/after: added, removed, and per-package deltas."""
+    now_us = sum(now.values()) if now_total is None else now_total
+    before_us = sum(before.values()) if before_total is None else before_total
+    added = sorted(set(now) - set(before), key=lambda n: now[n], reverse=True)
+    gone = sorted(set(before) - set(now), key=lambda n: before[n], reverse=True)
+    slower: list[dict] = []
+    faster: list[dict] = []
+    for name in set(now) & set(before):
+        delta_us = now[name] - before[name]
+        if abs(delta_us) < _DELTA_FLOOR_US:
+            continue
+        row = {
+            "name": name,
+            "delta_us": delta_us,
+            "before_us": before[name],
+            "now_us": now[name],
+        }
+        if delta_us > 0:
+            slower.append(row)
+        else:
+            faster.append(row)
+    slower.sort(key=lambda row: row["delta_us"], reverse=True)
+    faster.sort(key=lambda row: row["delta_us"])
+    return {
+        "before_us": before_us,
+        "now_us": now_us,
+        "delta_us": now_us - before_us,
+        "added": [{"name": n, "self_us": now[n]} for n in added],
+        "removed": [{"name": n, "self_us": before[n]} for n in gone],
+        "slower": slower,
+        "faster": faster,
+    }
+
+
 def render_compare(
     now: dict[str, int],
     before: dict[str, int],
@@ -177,9 +270,10 @@ def render_compare(
     now_total: int | None = None,
     before_total: int | None = None,
 ) -> str:
-    now_us = sum(now.values()) if now_total is None else now_total
-    before_us = sum(before.values()) if before_total is None else before_total
-    delta = now_us - before_us
+    diff = diff_profiles(
+        now, before, now_total=now_total, before_total=before_total
+    )
+    delta = diff["delta_us"]
     if delta < 0:
         arrow = "faster"
     elif delta > 0:
@@ -187,20 +281,28 @@ def render_compare(
     else:
         arrow = "unchanged"
     lines = [
-        f"compared with saved profile  before {format_ms(before_us)}  "
-        f"now {format_ms(now_us)}  {format_ms(abs(delta))} {arrow}",
+        f"compared with saved profile  before {format_ms(diff['before_us'])}  "
+        f"now {format_ms(diff['now_us'])}  {format_ms(abs(delta))} {arrow}",
         "",
     ]
-    added = sorted(set(now) - set(before), key=lambda n: now[n], reverse=True)
-    gone = sorted(set(before) - set(now), key=lambda n: before[n], reverse=True)
+    added = diff["added"]
+    gone = diff["removed"]
     if added:
         lines.append("  newly imported:")
-        for name in added[:8]:
-            lines.append(f"    {name:<24} +{format_ms(now[name])}")
+        for row in added[:8]:
+            lines.append(f"    {row['name']:<24} +{format_ms(row['self_us'])}")
     if gone:
         lines.append("  no longer imported:")
-        for name in gone[:8]:
-            lines.append(f"    {name:<24} -{format_ms(before[name])}")
-    if not added and not gone:
+        for row in gone[:8]:
+            lines.append(f"    {row['name']:<24} -{format_ms(row['self_us'])}")
+    if diff["slower"]:
+        lines.append("  slower:")
+        for row in diff["slower"][:8]:
+            lines.append(f"    {row['name']:<24} +{format_ms(row['delta_us'])}")
+    if diff["faster"]:
+        lines.append("  faster:")
+        for row in diff["faster"][:8]:
+            lines.append(f"    {row['name']:<24} -{format_ms(-row['delta_us'])}")
+    if not added and not gone and not diff["slower"] and not diff["faster"]:
         lines.append("  same package set")
     return "\n".join(lines)

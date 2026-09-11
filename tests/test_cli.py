@@ -71,3 +71,26 @@ def test_cli_json_and_modules(capsys):
     payload = json.loads(out)
     assert rc == 0
     assert payload["grouped_by"] == "module"
+
+
+def test_forbid_unknown_package_passes():
+    report, code = measured_collect(
+        [str(FIXTURE)], timeout=60, forbid=["definitely_not_imported_xyz"]
+    )
+    assert code == 0
+    assert "forbidden imports" not in report
+
+
+def test_forbid_json_fails_because_pytest_imports_it():
+    report, code = measured_collect(
+        [str(FIXTURE)], timeout=60, forbid=["json"]
+    )
+    assert code == 1
+    assert "forbidden imports" in report
+    assert "json" in report
+
+
+def test_cli_forbid_unknown_exits_zero(capsys):
+    rc = main(["--forbid", "definitely_not_imported_xyz", "--", str(FIXTURE)])
+    capsys.readouterr()
+    assert rc == 0
